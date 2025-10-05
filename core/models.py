@@ -6,7 +6,8 @@ from django.contrib.postgres.fields import ArrayField
 ROLE_CHOICES=(("instrument_manager","instrument_manager"),("trained_user","trained_user"))
 VIS_CHOICES=(("public","public"),("restricted","restricted"))
 SRC_TYPE=(("pdf","pdf"),("video","video"),("image","image"),("note","note"),("url","url"))
-SRC_STATUS=(("uploaded","uploaded"),("processing","processing"),("parsed","parsed"),("embedded","embedded"),("approved","approved"),("rejected","rejected"))
+SRC_STATUS=(("uploaded","uploaded"),("processing","processing"),("parsed","parsed"),("embedded","embedded"),("approved","approved"),("rejected","rejected"),("archived","archived"))
+CATEGORY_CHOICES=(("manual","Manual"),("protocol","Protocol"),("sop","SOP"),("troubleshooting","Troubleshooting"),("training","Training"),("maintenance","Maintenance"))
 
 class Instrument(models.Model):
     id=models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -29,11 +30,15 @@ class Source(models.Model):
     folder=models.ForeignKey(Folder, on_delete=models.SET_NULL, null=True, blank=True)
     type=models.CharField(max_length=12, choices=SRC_TYPE)
     title=models.CharField(max_length=255)
+    category=models.CharField(max_length=32, choices=CATEGORY_CHOICES, blank=True, null=True)
+    description=models.TextField(blank=True, null=True)
     version=models.CharField(max_length=50, blank=True, null=True)
     model_tags=ArrayField(models.CharField(max_length=64), default=list, blank=True)
     storage_uri=models.TextField()
     status=models.CharField(max_length=12, choices=SRC_STATUS, default="uploaded")
     checksum=models.CharField(max_length=200, blank=True, null=True)
+    archived=models.BooleanField(default=False)
+    archived_at=models.DateTimeField(null=True, blank=True)
     created_at=models.DateTimeField(auto_now_add=True)
 
 class SourceVersion(models.Model):

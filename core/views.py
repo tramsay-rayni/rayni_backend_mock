@@ -39,6 +39,11 @@ class FolderViewSet(ModelViewSet):
     queryset = Folder.objects.all()
     serializer_class = FolderSerializer
     permission_classes = [AllowAny]
+    def list(self, request, *a, **kw):
+        qs = self.queryset
+        instrument = request.GET.get("instrument")
+        if instrument: qs = qs.filter(instrument_id=instrument)
+        return Response(FolderSerializer(qs, many=True).data)
 
 class SourceViewSet(ModelViewSet):
     queryset = Source.objects.all().order_by("-created_at")
@@ -454,7 +459,19 @@ def uploads_initiate(request):
 @permission_classes([AllowAny])
 def uploads_complete(request, upload_id):
     instrument_id = request.data.get("instrument_id")
-    s = Source.objects.create(instrument_id=instrument_id, type=request.data.get("type","pdf"), title=request.data.get("title","Uploaded File"), storage_uri=f"minio://{upload_id}", status="uploaded")
+    folder_id = request.data.get("folder_id")
+    s = Source.objects.create(
+        instrument_id=instrument_id,
+        folder_id=folder_id,
+        type=request.data.get("type", "pdf"),
+        title=request.data.get("title", "Uploaded File"),
+        category=request.data.get("category"),
+        description=request.data.get("description"),
+        version=request.data.get("version"),
+        model_tags=request.data.get("model_tags", []),
+        storage_uri=f"minio://{upload_id}",
+        status="uploaded"
+    )
     return Response({"source_id": str(s.id), "status": s.status})
 
 # --- Connectors scaffold ---
@@ -473,6 +490,17 @@ def connectors_create(request):
 @permission_classes([AllowAny])
 def connectors_sync(request, conn_id):
     return Response({"status":"scheduled"}, status=202)
+
+# --- Archive endpoint (admin-only) ---
+@api_view(["PATCH"])
+@permission_classes([AllowAny])
+def archive_source(request, source_id):
+    source = get_object_or_404(Source, id=source_id)
+    source.archived = True
+    source.archived_at = now()
+    source.status = "archived"
+    source.save()
+    return Response(SourceSerializer(source).data)
 
 # --- Viewer meta endpoints (used by frontend to draw highlights) ---
 @api_view(["GET"])

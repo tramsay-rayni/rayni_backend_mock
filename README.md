@@ -78,12 +78,21 @@ docker compose logs -f api
 ```
 You should see: *"System check identified no issues"* and server on `http://0.0.0.0:8000/`.
 
-3. **Seed demo instruments** (recommended for first-time setup)
+3. **Seed demo data** (recommended for first-time setup)
 ```bash
-# Populate the database with realistic lab instruments
+# Step 1: Populate instruments
 docker compose exec api python manage.py seed_instruments --clear
+
+# Step 2: Create default folder structure for all instruments
+docker compose exec api python manage.py seed_folders
+
+# Step 3: Add sample documents to each instrument
+docker compose exec api python manage.py seed_sources
 ```
-This creates 10 scientific laboratory instruments (flow cytometers, mass spectrometers, microscopes, etc.) with realistic vendor names and model variations. The `--clear` flag removes any existing instruments first.
+This creates:
+- **10 scientific laboratory instruments** (flow cytometers, mass spectrometers, microscopes, etc.) with realistic vendor names and model variations
+- **60 folders** (6 per instrument): Manuals, Protocols, SOPs, Troubleshooting, Training, Maintenance
+- **52 sample documents** with realistic titles, categories, and metadata organized into folders
 
 4. **Smoke tests**
 ```bash
@@ -237,7 +246,11 @@ PY
 ### Instruments & Sources
 - `GET /api/instruments/`
 - `GET /api/sources/?instrument=<uuid>&q=&type=&status=&page=&page_size=`
-- `GET /api/sourceversions/` (if routed)
+  - Returns sources with: `id`, `title`, `type`, `category`, `description`, `version`, `model_tags`, `folder`, `archived`, `created_at`
+- `GET /api/folders/?instrument=<uuid>` - List folders for an instrument
+- `POST /api/folders/` - Create folder: `{ "instrument": "uuid", "name": "string", "parent": "uuid|null" }`
+- `DELETE /api/folders/<folder_id>/` - Delete folder (documents inside are preserved)
+- `PATCH /api/sources/<source_id>/archive` - Archive a document (admin-only)
 
 ### Access Control
 (Exact routing may vary by `urls.py`; function names shown.)
@@ -251,6 +264,8 @@ PY
 ### Uploads
 - `POST /api/uploads/initiate` → `{ upload_id, signed_url, headers }`
 - `PATCH /api/uploads/<upload_id>/complete` → `{ source_id, status }`
+  - **Body**: `{ "instrument_id": "uuid", "type": "pdf|video|image|note", "title": "string", "category": "manual|protocol|sop|troubleshooting|training|maintenance", "description": "string", "version": "string", "model_tags": ["string"], "folder_id": "uuid" }`
+  - All fields except `instrument_id`, `type`, and `title` are optional
 
 ### Connectors
 - `GET /api/connectors`
@@ -319,9 +334,11 @@ rayni-backend/
 
 ## Demo Data Management
 
-### Seed Instruments Command
+### Seed Commands
 
-The project includes a Django management command to populate the database with realistic scientific laboratory instruments:
+The project includes three Django management commands to populate the database with realistic data:
+
+#### 1. Seed Instruments
 
 ```bash
 # Seed instruments (keeps existing data if no conflicts)
@@ -343,13 +360,55 @@ docker compose exec api python manage.py seed_instruments --clear
 - Cell Discoverer 7 (Zeiss) - Live-cell imaging system
 - Biomek i7 (Beckman Coulter) - Automated liquid handler
 
-Each instrument includes:
-- Realistic vendor names from major lab equipment manufacturers
-- Model variations (e.g., A1, A3, A5 for BD FACSymphony)
-- Visibility settings (public or restricted)
-- Descriptive text explaining the instrument's purpose
+Each instrument includes realistic vendor names, model variations, visibility settings, and descriptive text.
 
-You can customize the seeded data by editing `core/management/commands/seed_instruments.py`.
+#### 2. Seed Folders
+
+```bash
+docker compose exec api python manage.py seed_folders
+```
+
+Creates a default folder structure for all instruments:
+- **Manuals** - User guides, reference documentation
+- **Protocols** - Experimental procedures, methods
+- **SOPs** - Standard Operating Procedures for compliance
+- **Troubleshooting** - Error guides, FAQs, diagnostic procedures
+- **Training** - Tutorials, onboarding materials, videos
+- **Maintenance** - Calibration logs, service records, preventive maintenance
+
+Folders support **nested hierarchies** - you can create subfolders within any root folder.
+
+#### 3. Seed Sources
+
+```bash
+docker compose exec api python manage.py seed_sources
+```
+
+Creates 5-10 realistic sample documents for each instrument, including:
+- PDFs with realistic titles (e.g., "BD FACSAria III User Manual v8.2.pdf")
+- Training videos (MP4 files)
+- Troubleshooting guides
+- SOPs with version numbers
+
+Each document includes:
+- **Category** classification (manual, protocol, sop, troubleshooting, training, maintenance)
+- **Folder assignment** (automatically placed in appropriate folder)
+- **Model tags** (applicable equipment variants)
+- **Version numbers** where appropriate
+- **Descriptions** for AI context
+
+Documents are vendor-specific, so instruments from Zeiss get microscopy-related docs, Thermo instruments get mass spec docs, etc.
+
+#### Full Setup Example
+
+```bash
+# Complete demo data setup (recommended for new deployments)
+docker compose exec api python manage.py seed_instruments --clear
+docker compose exec api python manage.py seed_folders
+docker compose exec api python manage.py seed_sources
+```
+
+You can customize the seeded data by editing the command files in `core/management/commands/`.
 
 ---
 

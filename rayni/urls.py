@@ -10,6 +10,7 @@ from core.views import (
     uploads_initiate, uploads_complete,
     users_list, users_invite, access_requests, access_request_action, access_grants, access_grant_create, access_grant_update,
     connectors_list, connectors_create, connectors_sync,
+    archive_source,
     viewer_pdf_meta, viewer_video_meta, viewer_image_meta,
 )
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
@@ -58,6 +59,8 @@ urlpatterns=[
  path("api/connectors", connectors_list),
  path("api/connectors/create", connectors_create),
  path("api/connectors/<uuid:conn_id>/sync", connectors_sync),
+ # sources
+ path("api/sources/<uuid:source_id>/archive", archive_source),
  # viewer meta
  path("api/viewer/pdf/<uuid:source_id>", viewer_pdf_meta),
  path("api/viewer/video/<uuid:source_id>", viewer_video_meta),
