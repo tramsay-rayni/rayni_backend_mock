@@ -94,6 +94,10 @@ curl -s -X POST http://localhost:8000/api/chat/ask \
 curl -N "http://localhost:8000/stream/chat?instrument_id=$INSTR&q=stream this"
 ```
 
+4. **Explore the API docs**
+   Interactive API documentation is available at: **http://localhost:8000/api/docs/**
+   This provides a Swagger UI with all available endpoints, request/response schemas, and a built-in API client for testing.
+
 ---
 
 ## Authentication & Testing
@@ -200,6 +204,8 @@ PY
 ---
 
 ## Core API (Minimal Contract)
+
+> **📚 Full interactive API documentation available at http://localhost:8000/api/docs/**
 
 ### Chat
 - `POST /api/chat/ask`
