@@ -76,9 +76,16 @@ docker compose up -d --build
 # Watch API
 docker compose logs -f api
 ```
-You should see: *“System check identified no issues”* and server on `http://0.0.0.0:8000/`.
+You should see: *"System check identified no issues"* and server on `http://0.0.0.0:8000/`.
 
-3. **Smoke tests**
+3. **Seed demo instruments** (recommended for first-time setup)
+```bash
+# Populate the database with realistic lab instruments
+docker compose exec api python manage.py seed_instruments --clear
+```
+This creates 10 scientific laboratory instruments (flow cytometers, mass spectrometers, microscopes, etc.) with realistic vendor names and model variations. The `--clear` flag removes any existing instruments first.
+
+4. **Smoke tests**
 ```bash
 # Instruments
 curl -s http://localhost:8000/api/instruments/ | jq .
@@ -192,6 +199,10 @@ docker compose ps
 docker compose logs -f api
 # Rebuild & recreate
 docker compose up -d --build --force-recreate
+
+# Seed/reset demo data
+docker compose exec api python manage.py seed_instruments --clear
+
 # Django shell with settings
 docker compose exec -T api python - <<'PY'
 import os, django
@@ -306,17 +317,54 @@ rayni-backend/
 
 ---
 
+## Demo Data Management
+
+### Seed Instruments Command
+
+The project includes a Django management command to populate the database with realistic scientific laboratory instruments:
+
+```bash
+# Seed instruments (keeps existing data if no conflicts)
+docker compose exec api python manage.py seed_instruments
+
+# Clear and reseed (removes all existing instruments)
+docker compose exec api python manage.py seed_instruments --clear
+```
+
+**Default Instruments Included:**
+- BD FACSymphony (BD Biosciences) - Flow cytometer
+- Orbitrap Fusion (Thermo Fisher) - Mass spectrometer
+- QuantStudio Real-Time PCR (Thermo Fisher) - PCR system
+- LSM 980 (Zeiss) - Confocal microscope
+- Agilent 1290 Infinity II (Agilent) - HPLC system
+- Centrifuge 5910 Ri (Eppendorf) - Refrigerated centrifuge
+- NanoDrop OneC (Thermo Fisher) - Spectrophotometer
+- AVANCE NEO (Bruker) - NMR spectrometer
+- Cell Discoverer 7 (Zeiss) - Live-cell imaging system
+- Biomek i7 (Beckman Coulter) - Automated liquid handler
+
+Each instrument includes:
+- Realistic vendor names from major lab equipment manufacturers
+- Model variations (e.g., A1, A3, A5 for BD FACSymphony)
+- Visibility settings (public or restricted)
+- Descriptive text explaining the instrument's purpose
+
+You can customize the seeded data by editing `core/management/commands/seed_instruments.py`.
+
+---
+
 ## Deployment Notes
 - Containerized via `docker compose`; production can use the same images.
 - Place a reverse proxy (nginx) in front; ensure SSE headers (`Cache-Control: no-cache`, `X-Accel-Buffering: no`) pass through.
-- Configure CORS appropriately (don’t use `*` in production).
+- Configure CORS appropriately (don't use `*` in production).
+- Run `python manage.py seed_instruments` in production only if you want demo data; otherwise manage instruments via the Django admin or API.
 
 ---
 
 ### Extras
 If helpful, we can also provide:
 - **Operator Quickstart (PDF)** — 1‑page startup & smoke tests.
-- **Postman collection** — covering `chat/ask`, `chat/stream` (note: Postman UI doesn’t render SSE), and `citations/turn/:id`.
+- **Postman collection** — covering `chat/ask`, `chat/stream` (note: Postman UI doesn't render SSE), and `citations/turn/:id`.
 
-> Ask and we’ll export these artifacts, or you can adapt from the sections above.
+> Ask and we'll export these artifacts, or you can adapt from the sections above.
 
