@@ -4,7 +4,7 @@ from rest_framework.routers import DefaultRouter
 from core.views import (
     InstrumentViewSet, FolderViewSet, SourceViewSet, SourceVersionViewSet,
     request_access, auth_me, auth_login, auth_logout,
-    chat_ask, chat_stream, chat_regen, chat_turn_feedback,
+    chat_ask, chat_attach, chat_stream, chat_regen, chat_turn_feedback,
     citations_for_turn,
     faq, feedback_list, feedback_submit, feedback_respond,
     uploads_initiate, uploads_complete,
@@ -31,38 +31,40 @@ urlpatterns=[
  path("api/auth/login", auth_login),
  path("api/auth/logout", auth_logout),
  path("api/auth/me", auth_me),
- path("api/", include(router.urls)),
- # access
- path("api/instruments/<uuid:instrument_id>/request-access", request_access),
- path("api/instruments/<uuid:instrument_id>/access/requests", access_requests),
- path("api/instruments/<uuid:instrument_id>/access/requests/<uuid:req_id>/<str:action>", access_request_action),  # approve|deny
- path("api/instruments/<uuid:instrument_id>/access/grants", access_grants),
- path("api/instruments/<uuid:instrument_id>/access/grants/create", access_grant_create),
- path("api/instruments/<uuid:instrument_id>/access/grants/<uuid:grant_id>", access_grant_update),
- # chat
+ # chat - BEFORE router
  path("api/chat/ask", chat_ask),
+ path("api/chat/attach", chat_attach),
  path("api/chat/turns/<uuid:turn_id>/regenerate", chat_regen),
  path("api/chat/turns/<uuid:turn_id>/feedback", chat_turn_feedback),
  path("api/chat/turns/<uuid:turn_id>/citations", citations_for_turn),
- # support
+ # access - BEFORE router
+ path("api/instruments/<uuid:instrument_id>/request-access", request_access),
+ path("api/instruments/<uuid:instrument_id>/access/requests", access_requests),
+ path("api/instruments/<uuid:instrument_id>/access/requests/<uuid:req_id>/<str:action>", access_request_action),
+ path("api/instruments/<uuid:instrument_id>/access/grants", access_grants),
+ path("api/instruments/<uuid:instrument_id>/access/grants/create", access_grant_create),
+ path("api/instruments/<uuid:instrument_id>/access/grants/<uuid:grant_id>", access_grant_update),
+ # support - BEFORE router
  path("api/support/faq", faq),
  path("api/support/feedback", feedback_submit),
  path("api/support/feedback/list", feedback_list),
  path("api/support/feedback/<uuid:fb_id>/respond", feedback_respond),
- # uploads
+ # uploads - BEFORE router
  path("api/uploads/initiate", uploads_initiate),
  path("api/uploads/<uuid:upload_id>/complete", uploads_complete),
- # users
+ # users - BEFORE router
  path("api/users", users_list),
  path("api/users/invite", users_invite),
- # connectors (scaffold)
+ # connectors - BEFORE router
  path("api/connectors", connectors_list),
  path("api/connectors/create", connectors_create),
  path("api/connectors/<uuid:conn_id>/sync", connectors_sync),
- # sources
+ # sources - BEFORE router
  path("api/sources/<uuid:source_id>/archive", archive_source),
- # viewer meta
+ # viewer meta - BEFORE router
  path("api/viewer/pdf/<uuid:source_id>", viewer_pdf_meta),
  path("api/viewer/video/<uuid:source_id>", viewer_video_meta),
  path("api/viewer/image/<uuid:source_id>", viewer_image_meta),
+ # Router MUST be last - catches all remaining /api/ routes
+ path("api/", include(router.urls)),
 ]

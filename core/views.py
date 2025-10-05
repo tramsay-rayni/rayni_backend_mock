@@ -219,13 +219,18 @@ def users_list(request):
 def users_invite(request):
     return Response({"status":"invited","email":request.data.get("email")}, status=201)
 
-# --- OpenAI simple completion (non-stream) ---
-def _openai_complete(prompt: str) -> str:
+# --- OpenAI simple completion (non-stream) with RAG ---
+def _openai_complete(prompt: str, instrument_id: str = None) -> tuple:
     """
-    Minimal HTTP call to OpenAI Chat Completions.
+    Minimal HTTP call to OpenAI Chat Completions with RAG support.
     Reads OPENAI_API_KEY (required), OPENAI_BASE_URL and OPENAI_MODEL (optional) from env/settings.
+
+    Returns:
+        Tuple of (answer_text, citations_list)
     """
     from django.conf import settings as dj_settings
+    from .rag_utils import search_sources, build_context_prompt, parse_citations_from_response
+
     api_key = os.environ.get("OPENAI_API_KEY") or getattr(dj_settings, "OPENAI_API_KEY", None)
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY missing")
@@ -236,6 +241,24 @@ def _openai_complete(prompt: str) -> str:
     model = (os.environ.get("OPENAI_MODEL")
              or getattr(dj_settings, "OPENAI_MODEL", None)
              or "gpt-4o-mini")
+
+    # Search sources and get instrument context if instrument_id provided
+    sources = []
+    instrument_context = None
+    if instrument_id:
+        sources = search_sources(instrument_id, prompt, limit=5)
+        # Get instrument info
+        try:
+            instrument = Instrument.objects.get(id=instrument_id)
+            instrument_context = {
+                'name': instrument.name,
+                'vendor': instrument.vendor,
+                'models_arr': instrument.models_arr,
+                'description': instrument.description
+            }
+        except Instrument.DoesNotExist:
+            pass
+        prompt = build_context_prompt(prompt, sources, instrument_context)
 
     url = f"{base_url}/chat/completions"
     payload = {
@@ -258,7 +281,13 @@ def _openai_complete(prompt: str) -> str:
 
     if "choices" not in data or not data["choices"]:
         raise RuntimeError(f"Bad OpenAI response: {data}")
-    return data["choices"][0]["message"]["content"]
+
+    answer_text = data["choices"][0]["message"]["content"]
+
+    # Parse citations from response
+    answer_text, citations = parse_citations_from_response(answer_text, sources)
+
+    return answer_text, citations
 
 # --- Chat (non-stream) ---
 @api_view(["POST"])
@@ -273,8 +302,9 @@ def chat_ask(request):
     user_turn = ChatTurn.objects.create(session=sess, role="user", text=question)
 
     ans_text = None
+    citations_data = []
     try:
-        ans_text = _openai_complete(question or "Say hello.")
+        ans_text, citations_data = _openai_complete(question or "Say hello.", instrument_id=instrument_id)
     except Exception as e:
         ans_text = f"[LLM error: {e}]"
 
@@ -283,18 +313,38 @@ def chat_ask(request):
 
     ans_turn = ChatTurn.objects.create(session=sess, role="assistant", text=ans_text)
 
-    sources = list(Source.objects.filter(instrument_id=instrument_id)[:2])
+    # Create real citations from RAG results
     cites = []
-    for s in sources:
-        cid = uuid.uuid4()
-        Citation.objects.create(turn=ans_turn, source=s, fragment_id=cid)
-        cites.append({"source_id": str(s.id), "fragment_id": str(cid), "score": 0.8})
+    for cite_data in citations_data:
+        source = Source.objects.filter(id=cite_data['source_id']).first()
+        if source:
+            # Create a fragment ID (for now, just use UUID; later can point to actual fragments)
+            frag_id = uuid.uuid4()
+            Citation.objects.create(turn=ans_turn, source=source, fragment_id=frag_id)
+            cites.append({
+                "source_id": str(source.id),
+                "source_title": cite_data.get('source_title', source.title),
+                "source_type": cite_data.get('source_type', source.type),
+                "fragment_id": str(frag_id),
+                "score": cite_data.get('score', 0.9)
+            })
 
     return Response({"turn_id": str(ans_turn.id), "answer": ans_turn.text, "citations": cites})
 
-# --- OpenAI streaming helper ---
-def _stream_tokens_openai(question):
+# --- OpenAI streaming helper with RAG ---
+def _stream_tokens_openai(question, instrument_id=None):
+    """
+    Stream tokens from OpenAI with RAG support.
+
+    Args:
+        question: User's question
+        instrument_id: UUID of instrument for RAG context
+
+    Yields:
+        Token strings OR dict with 'citations' key at the end
+    """
     from django.conf import settings
+    from .rag_utils import search_sources, build_context_prompt, parse_citations_from_response
     import os
     try:
         from openai import OpenAI
@@ -312,6 +362,24 @@ def _stream_tokens_openai(question):
             yield "[OpenAI error: OPENAI_API_KEY not set]"
             return
 
+        # Search sources and get instrument context if instrument_id provided
+        sources = []
+        instrument_context = None
+        if instrument_id:
+            sources = search_sources(instrument_id, question, limit=5)
+            # Get instrument info
+            try:
+                instrument = Instrument.objects.get(id=instrument_id)
+                instrument_context = {
+                    'name': instrument.name,
+                    'vendor': instrument.vendor,
+                    'models_arr': instrument.models_arr,
+                    'description': instrument.description
+                }
+            except Instrument.DoesNotExist:
+                pass
+            question = build_context_prompt(question, sources, instrument_context)
+
         # Create custom httpx client without proxy support to avoid initialization errors
         http_client = httpx.Client(timeout=60.0)
 
@@ -326,12 +394,20 @@ def _stream_tokens_openai(question):
             messages=[{"role":"user","content":question}],
             stream=True
         )
+
+        full_text = ""
         for chunk in stream:
             delta = chunk.choices[0].delta.content or ""
             if delta:
+                full_text += delta
                 yield delta
 
         http_client.close()
+
+        # Parse citations after streaming complete
+        _, citations = parse_citations_from_response(full_text, sources)
+        yield {"citations": citations}
+
     except Exception as e:
         yield f"[OpenAI error: {e}]"
 
@@ -355,11 +431,20 @@ def chat_stream(request):
         yield f"data: {json.dumps({'turn_id': str(user_turn.id)})}\n\n"
 
         text_accum = ""
+        citations_data = []
+
         from django.conf import settings
         if getattr(settings, "OPENAI_API_KEY", None):
-            for tok in _stream_tokens_openai(question):
+            for tok in _stream_tokens_openai(question, instrument_id=instrument_id):
                 if not tok:
                     continue
+
+                # Check if this is a citations dict (sent at the end)
+                if isinstance(tok, dict) and 'citations' in tok:
+                    citations_data = tok['citations']
+                    continue
+
+                # Regular token
                 text_accum += tok
                 yield "event: token\n"
                 yield f"data: {json.dumps({'t': tok})}\n\n"
@@ -373,8 +458,21 @@ def chat_stream(request):
 
         # finalize and create assistant turn
         ans_turn = ChatTurn.objects.create(session=user_turn.session, role="assistant", text=text_accum)
-        srcs = list(Source.objects.filter(instrument_id=instrument_id)[:2])
-        cites = [{"source_id": str(s.id), "fragment_id": str(uuid.uuid4()), "score": 0.8} for s in srcs]
+
+        # Create real citations from RAG results
+        cites = []
+        for cite_data in citations_data:
+            source = Source.objects.filter(id=cite_data['source_id']).first()
+            if source:
+                frag_id = uuid.uuid4()
+                Citation.objects.create(turn=ans_turn, source=source, fragment_id=frag_id)
+                cites.append({
+                    "source_id": str(source.id),
+                    "source_title": cite_data.get('source_title', source.title),
+                    "source_type": cite_data.get('source_type', source.type),
+                    "fragment_id": str(frag_id),
+                    "score": cite_data.get('score', 0.9)
+                })
 
         yield "event: done\n"
         yield f"data: {json.dumps({'turn_id': str(ans_turn.id), 'citations': cites})}\n\n"
@@ -386,6 +484,89 @@ def chat_stream(request):
     # CORS is handled by corsheaders middleware (settings.py)
     # Do NOT set Access-Control-Allow-Origin here as it conflicts with credentials mode
     return resp
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def chat_attach(request):
+    """
+    Handle chat with file attachments.
+    Extracts text from files and includes in context.
+    """
+    # Parse form data
+    instrument_id = request.POST.get("instrument_id") or request.data.get("instrument_id")
+    question = (request.POST.get("question") or request.data.get("question") or "").strip()
+    files = request.FILES.getlist("files")
+
+    if not instrument_id:
+        return Response({"detail": "instrument_id is required"}, status=400)
+
+    try:
+        sess = ChatSession.objects.create(instrument_id=instrument_id)
+        user_turn = ChatTurn.objects.create(session=sess, role="user", text=question)
+
+        # Extract text from attached files
+        attachment_texts = []
+        for file in files:
+            try:
+                file_bytes = file.read()
+                if file.name.lower().endswith('.pdf'):
+                    from .rag_utils import extract_text_from_pdf
+                    text = extract_text_from_pdf(file_bytes)
+                    if text:
+                        attachment_texts.append(f"[Attachment: {file.name}]\n{text[:2000]}")  # Limit per file
+                    else:
+                        attachment_texts.append(f"[Attachment: {file.name}] (No text extracted)")
+                else:
+                    # Try to decode as text
+                    try:
+                        text = file_bytes.decode('utf-8')
+                        attachment_texts.append(f"[Attachment: {file.name}]\n{text[:2000]}")
+                    except:
+                        attachment_texts.append(f"[Attachment: {file.name}] (Binary file - cannot extract text)")
+            except Exception as e:
+                print(f"Error processing file {file.name}: {e}")
+                attachment_texts.append(f"[Attachment: {file.name}] (Error: {str(e)})")
+
+        # Build enhanced prompt with attachments
+        enhanced_question = question
+        if attachment_texts:
+            enhanced_question = f"{question}\n\nUser has attached the following documents for context:\n" + "\n\n".join(attachment_texts)
+
+        ans_text = None
+        citations_data = []
+        try:
+            ans_text, citations_data = _openai_complete(enhanced_question, instrument_id=instrument_id)
+        except Exception as e:
+            print(f"OpenAI error: {e}")
+            ans_text = f"[LLM error: {e}]"
+
+        if not ans_text:
+            ans_text = "This is a placeholder answer. Set OPENAI_API_KEY to enable real LLM responses."
+
+        ans_turn = ChatTurn.objects.create(session=sess, role="assistant", text=ans_text)
+
+        # Create citations
+        cites = []
+        for cite_data in citations_data:
+            source = Source.objects.filter(id=cite_data['source_id']).first()
+            if source:
+                frag_id = uuid.uuid4()
+                Citation.objects.create(turn=ans_turn, source=source, fragment_id=frag_id)
+                cites.append({
+                    "source_id": str(source.id),
+                    "source_title": cite_data.get('source_title', source.title),
+                    "source_type": cite_data.get('source_type', source.type),
+                    "fragment_id": str(frag_id),
+                    "score": cite_data.get('score', 0.9)
+                })
+
+        return Response({"turn_id": str(ans_turn.id), "answer": ans_turn.text, "citations": cites})
+
+    except Exception as e:
+        print(f"chat_attach error: {e}")
+        import traceback
+        traceback.print_exc()
+        return Response({"detail": f"Error processing request: {str(e)}"}, status=500)
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def chat_regen(request, turn_id):
