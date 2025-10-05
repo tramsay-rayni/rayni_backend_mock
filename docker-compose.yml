@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: rayni
+      POSTGRES_USER: rayni
+      POSTGRES_PASSWORD: rayni
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio12345
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [miniodata:/data]
+
+  api:
+    build: .
+    env_file: [.env]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://rayni:rayni@db:5432/rayni}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret}
+      DEBUG: ${DEBUG:-1}
+      CELERY_BROKER_URL: redis://redis:6379/0
+    depends_on: [db, redis, minio]
+    ports: ["8000:8000"]
+
+  worker:
+    build: .
+    command: ["celery","-A","rayni","worker","-l","info"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://rayni:rayni@db:5432/rayni}
+      CELERY_BROKER_URL: redis://redis:6379/0
+    depends_on: [api, redis]
+
+volumes:
+  pgdata: {}
+  miniodata: {}
