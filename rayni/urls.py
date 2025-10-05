@@ -3,7 +3,7 @@ from django.urls import path, include, re_path
 from rest_framework.routers import DefaultRouter
 from core.views import (
     InstrumentViewSet, FolderViewSet, SourceViewSet, SourceVersionViewSet,
-    request_access, auth_me,
+    request_access, auth_me, auth_login, auth_logout,
     chat_ask, chat_stream, chat_regen, chat_turn_feedback,
     citations_for_turn,
     faq, feedback_list, feedback_submit, feedback_respond,
@@ -26,9 +26,11 @@ urlpatterns=[
  path("stream/chat", chat_stream),
  path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
  path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
- path("api/", include(router.urls)),
- # auth / me
+ # auth - BEFORE router to avoid conflicts
+ path("api/auth/login", auth_login),
+ path("api/auth/logout", auth_logout),
  path("api/auth/me", auth_me),
+ path("api/", include(router.urls)),
  # access
  path("api/instruments/<uuid:instrument_id>/request-access", request_access),
  path("api/instruments/<uuid:instrument_id>/access/requests", access_requests),

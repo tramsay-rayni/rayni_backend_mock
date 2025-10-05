@@ -40,7 +40,13 @@ DATABASES={
 LANGUAGE_CODE="en-us"; TIME_ZONE="UTC"; USE_I18N=True; USE_TZ=True
 STATIC_URL="/static/"
 DEFAULT_AUTO_FIELD="django.db.models.BigAutoField"
-CORS_ALLOW_ALL_ORIGINS=True
+
+# CORS settings for authentication with credentials
+CORS_ALLOWED_ORIGINS=[
+    "http://localhost:3001",
+    "http://localhost:3000",
+]
+CORS_ALLOW_CREDENTIALS=True
 
 REST_FRAMEWORK={
  "DEFAULT_SCHEMA_CLASS":"drf_spectacular.openapi.AutoSchema",

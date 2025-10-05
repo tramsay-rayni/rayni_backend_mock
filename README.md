@@ -96,6 +96,50 @@ curl -N "http://localhost:8000/stream/chat?instrument_id=$INSTR&q=stream this"
 
 ---
 
+## Authentication & Testing
+
+### Demo Users
+
+The backend includes two demo accounts for testing:
+
+**Admin User:**
+```bash
+curl -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@rayni.com"}' \
+  -c cookies.txt
+```
+- **Email**: `admin@rayni.com`
+- **Role**: Instrument Manager
+- **Access**: All instruments automatically
+- **Can**: Approve/deny access requests, manage users
+
+**Regular User:**
+```bash
+curl -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@rayni.com"}' \
+  -c cookies.txt
+```
+- **Email**: `user@rayni.com`
+- **Role**: Trained User
+- **Access**: Only granted instruments
+- **Can**: Request access, use approved instruments
+
+**Check Auth Status:**
+```bash
+curl http://localhost:8000/api/auth/me -b cookies.txt
+```
+
+**Logout:**
+```bash
+curl -X POST http://localhost:8000/api/auth/logout -b cookies.txt
+```
+
+See `TESTING-AUTH.md` in the repo root for complete testing scenarios.
+
+---
+
 ## Environment Variables
 
 | Name | Required | Default | Purpose |

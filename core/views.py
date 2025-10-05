@@ -7,6 +7,7 @@ from django.http import StreamingHttpResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from django.utils.timezone import now
+from django.views.decorators.csrf import csrf_exempt
 
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes, renderer_classes
@@ -60,12 +61,97 @@ class SourceVersionViewSet(ModelViewSet):
     permission_classes = [AllowAny]
 
 # --- Auth / Me ---
+# Demo users for testing (in production, use real authentication)
+DEMO_USERS = {
+    "admin@rayni.com": {
+        "userId": "admin",
+        "email": "admin@rayni.com",
+        "name": "Admin User",
+        "is_admin": True,
+        "role": "instrument_manager",
+    },
+    "user@rayni.com": {
+        "userId": "user1",
+        "email": "user@rayni.com",
+        "name": "Regular User",
+        "is_admin": False,
+        "role": "trained_user",
+    },
+}
+
+@csrf_exempt
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def auth_login(request):
+    """
+    Demo login endpoint - accepts email and returns user info.
+    In production, validate credentials properly.
+    """
+    email = request.data.get("email", "").lower()
+
+    if email not in DEMO_USERS:
+        return Response({"error": "User not found"}, status=400)
+
+    user_data = DEMO_USERS[email].copy()
+
+    # Get allowed instruments based on user role
+    if user_data["is_admin"]:
+        # Admins have access to all instruments
+        allowed = list(Instrument.objects.values_list("id", flat=True))
+    else:
+        # Regular users only have access to instruments they've been granted
+        grants = AccessGrant.objects.filter(
+            user_id=1,  # Demo: would use real user ID in production
+            status="active"
+        ).values_list("instrument_id", flat=True)
+        allowed = list(grants)
+
+    user_data["allowed"] = [str(x) for x in allowed]
+
+    # Store in session
+    request.session["user"] = user_data
+
+    return Response(user_data)
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def auth_logout(request):
+    """Logout and clear session"""
+    request.session.flush()
+    return Response({"message": "Logged out successfully"})
+
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def auth_me(request):
-    # Demo: allow first instrument only
-    inst = list(Instrument.objects.values_list("id", flat=True)[:1])
-    return Response({"userId":"demo", "allowed":[str(x) for x in inst], "is_admin": True})
+    """Get current user info from session"""
+    user = request.session.get("user")
+
+    if not user:
+        # Not logged in - return default demo user (for backward compatibility)
+        inst = list(Instrument.objects.values_list("id", flat=True)[:1])
+        return Response({
+            "userId": "guest",
+            "email": "guest@rayni.com",
+            "name": "Guest User",
+            "allowed": [str(x) for x in inst],
+            "is_admin": False,
+            "isGuest": True
+        })
+
+    # Refresh allowed instruments in case access was granted/revoked
+    if user["is_admin"]:
+        allowed = list(Instrument.objects.values_list("id", flat=True))
+    else:
+        grants = AccessGrant.objects.filter(
+            user_id=1,
+            status="active"
+        ).values_list("instrument_id", flat=True)
+        allowed = list(grants)
+
+    user["allowed"] = [str(x) for x in allowed]
+    request.session["user"] = user  # Update session
+
+    return Response(user)
 
 # --- Access control ---
 @api_view(["POST"])
@@ -292,8 +378,8 @@ def chat_stream(request):
     # help the browser/proxies treat it as a live stream
     resp["Cache-Control"] = "no-cache"
     resp["X-Accel-Buffering"] = "no"
-    # relax CORS for dev, so EventSource from :3000 -> :8000 works
-    resp["Access-Control-Allow-Origin"] = "*"
+    # CORS is handled by corsheaders middleware (settings.py)
+    # Do NOT set Access-Control-Allow-Origin here as it conflicts with credentials mode
     return resp
 @api_view(["POST"])
 @permission_classes([AllowAny])
